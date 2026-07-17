@@ -15,8 +15,10 @@ from mokumitsu.wind import (  # noqa: E402
     SummerWindScenario,
     WindDirection,
     add_wind_to_trajectory,
+    district_wind_base_masks,
     district_wind_masks,
     evaluate_district_wind,
+    evaluate_district_wind_with_field,
     predict_directional_wind,
     weighted_world_wind_ratio,
 )
@@ -57,6 +59,18 @@ def test_analysis_masks_cover_distinct_outdoor_zones(district):
     assert np.all(masks["roads"] <= masks["all_outdoor"])
     assert np.all(masks["parcel_open_space"] <= masks["all_outdoor"])
     assert np.all(masks["building_edge"] <= masks["all_outdoor"])
+
+
+def test_cached_road_and_parcel_masks_preserve_wind_metrics(district):
+    base = district_wind_base_masks(district, 32)
+    direct_masks = district_wind_masks(district, 32)
+    cached_masks = district_wind_masks(district, 32, base_masks=base)
+    assert all(np.array_equal(direct_masks[name], cached_masks[name]) for name in direct_masks)
+
+    scenario = SummerWindScenario(directions=(WindDirection(0.0, 0.7), WindDirection(90.0, 0.3)))
+    direct = evaluate_district_wind(district, scenario, _FakeModel())
+    cached = evaluate_district_wind(district, scenario, _FakeModel(), base_masks=base)
+    assert cached.to_dict() == direct.to_dict()
 
 
 def test_cardinal_wind_rose_reports_weak_and_strong_wind(district):
@@ -105,6 +119,22 @@ def test_weighted_world_wind_ratio_rotates_each_direction_back(district):
     assert ratio.shape == heightmap.shape == (32, 32)
     assert u0 == pytest.approx(1.0)
     assert ratio == pytest.approx(expected)
+
+    metrics, combined, combined_heightmap = evaluate_district_wind_with_field(
+        district,
+        scenario,
+        _FakeModel(),
+    )
+    assert combined == pytest.approx(ratio)
+    assert combined_heightmap == pytest.approx(heightmap)
+    assert (
+        metrics.to_dict()
+        == evaluate_district_wind(
+            district,
+            scenario,
+            _FakeModel(),
+        ).to_dict()
+    )
 
 
 def test_invalid_direction_and_non_square_site_are_rejected(district):

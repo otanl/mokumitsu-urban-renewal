@@ -72,8 +72,27 @@ def evaluate_district_wind(
     scenario: SummerWindScenario | None = None,
     model: FnoModel | None = None,
     reference_speed: float | None = None,
+    base_masks: dict[str, np.ndarray] | None = None,
 ) -> DistrictWindMetrics:
     """Evaluate weak/strong-wind fractions for all configured cardinal directions."""
+    metrics, _, _ = evaluate_district_wind_with_field(
+        district,
+        scenario,
+        model,
+        reference_speed,
+        base_masks,
+    )
+    return metrics
+
+
+def evaluate_district_wind_with_field(
+    district: MokumitsuDistrict,
+    scenario: SummerWindScenario | None = None,
+    model: FnoModel | None = None,
+    reference_speed: float | None = None,
+    base_masks: dict[str, np.ndarray] | None = None,
+) -> tuple[DistrictWindMetrics, np.ndarray, np.ndarray]:
+    """Evaluate zone metrics and return weighted world U/U0 without duplicate inference."""
     scenario = scenario or SummerWindScenario()
     _validate_scenario(scenario)
     model = model or load_model(scenario.model_name)
@@ -85,10 +104,14 @@ def evaluate_district_wind(
 
     heightmap = district.heightmap(res)
     masks = district_wind_masks(
-        district, res, building_edge_distance_m=scenario.building_edge_distance_m
+        district,
+        res,
+        building_edge_distance_m=scenario.building_edge_distance_m,
+        base_masks=base_masks,
     )
     total_weight = sum(direction.weight for direction in scenario.directions)
     directional = []
+    ratio = np.zeros((res, res), dtype=np.float32)
     for direction in scenario.directions:
         quarter_turns = int(round(direction.direction_deg / 90.0)) % 4
         # With row index representing +y, np.rot90(+k) is the physical -k*90° layout rotation
@@ -98,6 +121,9 @@ def evaluate_district_wind(
             name: np.rot90(mask, k=quarter_turns).copy() for name, mask in masks.items()
         }
         speed = _predict_speed(model, hm)
+        ratio += np.float32(direction.weight / total_weight) * (
+            np.rot90(speed, k=-quarter_turns).copy() / u0
+        )
         zones = {
             name: _zone_metrics(speed, hm, u0, mask, scenario.thresholds)
             for name, mask in rotated_masks.items()
@@ -111,13 +137,14 @@ def evaluate_district_wind(
         )
 
     weighted = {name: _weighted_zone(tuple(directional), name) for name in masks}
-    return DistrictWindMetrics(
+    metrics = DistrictWindMetrics(
         model_name=scenario.model_name,
         resolution=res,
         reference_speed=u0,
         directions=tuple(directional),
         weighted_zones=weighted,
     )
+    return metrics, ratio, heightmap
 
 
 def predict_directional_wind(
@@ -170,28 +197,23 @@ def weighted_world_wind_ratio(
 
     total_weight = sum(direction.weight for direction in scenario.directions)
     ratio = np.zeros((int(model.ny), int(model.nx)), dtype=np.float32)
+    world_heightmap = district.heightmap(int(model.ny))
     for direction in scenario.directions:
-        speed, _, _, _ = predict_directional_wind(
-            district,
-            direction_deg=direction.direction_deg,
-            model=model,
-            reference_speed=u0,
-            building_edge_distance_m=scenario.building_edge_distance_m,
-        )
         k = _quarter_turn(direction.direction_deg)
+        rotated_heightmap = np.rot90(world_heightmap, k=k).copy()
+        speed = _predict_speed(model, rotated_heightmap)
         speed_world = np.rot90(speed, k=-k).copy()
         ratio += np.float32(direction.weight / total_weight) * (speed_world / u0)
-    return ratio, district.heightmap(int(model.ny)), u0
+    return ratio, world_heightmap, u0
 
 
-def district_wind_masks(
+def district_wind_base_masks(
     district: MokumitsuDistrict,
     res: int,
-    building_edge_distance_m: float = 3.0,
 ) -> dict[str, np.ndarray]:
-    """Rasterize outdoor analysis zones on the same square grid as the surrogate."""
-    if res <= 0 or building_edge_distance_m <= 0:
-        raise ValueError("resolution and building-edge distance must be positive")
+    """Rasterize the road and parcel layers that stay fixed during massing edits."""
+    if res <= 0:
+        raise ValueError("resolution must be positive")
     xs = (np.arange(res, dtype=float) + 0.5) / res * district.width_m
     ys = (np.arange(res, dtype=float) + 0.5) / res * district.height_m
     gx, gy = np.meshgrid(xs, ys)
@@ -204,9 +226,27 @@ def district_wind_masks(
         t = np.clip(((gx - x0) * vx + (gy - y0) * vy) / length2, 0.0, 1.0)
         distance2 = (gx - (x0 + t * vx)) ** 2 + (gy - (y0 + t * vy)) ** 2
         road |= distance2 <= (segment.width_m / 2) ** 2
-
     parcel_union = unary_union([Polygon(parcel.polygon) for parcel in district.parcels])
     parcel = np.asarray(contains_xy(parcel_union, gx, gy), dtype=bool)
+    return {"roads": road, "parcels": parcel}
+
+
+def district_wind_masks(
+    district: MokumitsuDistrict,
+    res: int,
+    building_edge_distance_m: float = 3.0,
+    base_masks: dict[str, np.ndarray] | None = None,
+) -> dict[str, np.ndarray]:
+    """Rasterize outdoor analysis zones on the same square grid as the surrogate."""
+    if res <= 0 or building_edge_distance_m <= 0:
+        raise ValueError("resolution and building-edge distance must be positive")
+    base_masks = base_masks or district_wind_base_masks(district, res)
+    if set(base_masks) != {"roads", "parcels"}:
+        raise ValueError("base_masks must contain exactly roads and parcels")
+    road = np.asarray(base_masks["roads"], dtype=bool)
+    parcel = np.asarray(base_masks["parcels"], dtype=bool)
+    if road.shape != (res, res) or parcel.shape != (res, res):
+        raise ValueError("base-mask shapes must match the wind grid")
     heightmap = district.heightmap(res)
     building = heightmap > 1e-7
     open_cells = ~building

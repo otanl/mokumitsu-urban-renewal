@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "model_family": "residential",
+  "model_version": "1",
+  "release_tag": "models-residential-v1",
+  "release_url": "https://github.com/otanl/mokumitsu-urban-renewal/releases/tag/models-residential-v1",
+  "download_base_url": "https://github.com/otanl/mokumitsu-urban-renewal/releases/download/models-residential-v1",
+  "license": "MIT",
+  "intended_use": "Screening-level pedestrian wind comparison for synthetic dense residential neighbourhoods; not regulatory or validated engineering prediction.",
+  "training": {
+    "physics_source": "XLB Lattice-Boltzmann",
+    "physics_engine_license": "Apache-2.0",
+    "backend": "NVIDIA Warp",
+    "samples": 500,
+    "grid": [
+      128,
+      128
+    ],
+    "dataset_source_label": "xlb-residential",
+    "dataset_generation": "500 synthetic residential layouts, 2500 XLB steps per sample, generated with the same height-map representation consumed by Mokumitsu",
+    "training_command": ".venv\\Scripts\\python.exe scripts\\train_residential_fno.py --data data\\residential_xlb.npz --out checkpoints\\fno_residential_xlb.pt --modes 64 --hidden 64 --epochs 400 --best",
+    "torchscript_export_command": ".venv\\Scripts\\python.exe scripts\\export_residential_torchscript.py",
+    "architecture": {
+      "name": "FNO",
+      "n_modes": [
+        64,
+        64
+      ],
+      "hidden_channels": 64,
+      "n_layers": 4,
+      "in_channels": 1,
+      "out_channels": 1
+    }
+  },
+  "assets": [
+    {
+      "filename": "fno_residential_ts.pt",
+      "kind": "portable_torchscript",
+      "profiles": [
+        "portable"
+      ],
+      "destination": "checkpoints",
+      "bytes": 277121138,
+      "sha256": "03b6b9580fae8c30457da2faa35e22c0fb949534991961c058dd493665b25036"
+    },
+    {
+      "filename": "fno_residential_ts.json",
+      "kind": "portable_metadata",
+      "profiles": [
+        "portable"
+      ],
+      "destination": "checkpoints",
+      "bytes": 186,
+      "sha256": "f533098b9721c843b83830c5fc442e4c01d4327614a79c7c0c92576a8155a835"
+    },
+    {
+      "filename": "fno_residential_xlb.pt",
+      "kind": "accelerated_neuraloperator",
+      "profiles": [
+        "accelerated"
+      ],
+      "destination": "checkpoints",
+      "bytes": 277044910,
+      "sha256": "c334cede82f0d366857ee0960d68e164590d69eabed671bf3bedefab5a57375e"
+    },
+    {
+      "filename": "residential_xlb.npz",
+      "kind": "training_dataset",
+      "profiles": [
+        "dataset"
+      ],
+      "destination": "data",
+      "bytes": 29085760,
+      "sha256": "d4eec1cdb0a7c6ec03ea09cbd20f488948aab6e4ada181a89140214e7e78c33f"
+    }
+  ]
+}

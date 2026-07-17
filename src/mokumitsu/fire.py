@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.strtree import STRtree
 
 from .district import (
     DistrictBuilding,
@@ -107,11 +108,21 @@ def build_fire_graph(
     _validate_scenario(scenario, len(district.buildings))
     edges = []
     buildings = district.buildings
+    footprints = tuple(ShapelyPolygon(building.corners) for building in buildings)
+    tree = STRtree(footprints)
     for i, source in enumerate(buildings):
-        for target in buildings[i + 1 :]:
-            gap = _building_gap(source, target)
-            if gap > scenario.max_gap_m:
-                continue
+        target_indices = sorted(
+            int(index)
+            for index in tree.query(
+                footprints[i],
+                predicate="dwithin",
+                distance=scenario.max_gap_m,
+            )
+            if int(index) > i
+        )
+        for target_index in target_indices:
+            target = buildings[target_index]
+            gap = float(footprints[i].distance(footprints[target_index]))
             barrier = _barrier_width(district, source, target)
             edges.append(_directed_edge(source, target, gap, barrier, scenario))
             edges.append(_directed_edge(target, source, gap, barrier, scenario))

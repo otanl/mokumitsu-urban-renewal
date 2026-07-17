@@ -113,6 +113,12 @@ seed 0の初期案では、+X方向の既定ケースで道路の弱風域約14%
 完全には同分布でないため、FNOは候補削減用である。最終候補は入力高さマップを固定してXLBで
 再計算する。
 
+公開model Releaseにはportable TorchScript、常駐worker用NeuralOperator checkpoint、
+500件のXLB学習データを置く。`scripts/download_models.py`は
+`models/manifest.json`のbyte数とSHA-256を検証し、`--include-dataset`で学習データも
+取得する。再学習とTorchScript exportはそれぞれ
+`scripts/train_residential_fno.py`、`scripts/export_residential_torchscript.py`で行う。
+
 ## 接道不良敷地の共同建替え
 
 ~~~powershell
@@ -271,7 +277,7 @@ Houdini側でも同じShapely依存を使うため、初回だけHoudiniのPytho
 道路拡幅、公園、共有空地、風向に沿う空地連結の幾何操作に加え、事業費、権利床、
 仮移転、住戸容量の累積スクリーニングまで初期モデルを実装した。
 
-1. Houdini上のパラメトリック編集、FNO/fire preview、cache key、Pareto比較を同じ評価器契約で接続する
+1. Houdini上のPareto候補比較、preview/XLB provenance、非同期評価を同じ評価器契約で接続する
 2. 実在地区のGIS・世帯・権利者・費用資料で生成分布と事業評価を較正する
 3. 複数seed・風向のPareto候補をXLBで再評価し、簡易延焼を校正済みモデルと比較する
 4. 実気象の風配を入れ、外壁風圧・開口・室内換気回数の評価を後段へ接続する

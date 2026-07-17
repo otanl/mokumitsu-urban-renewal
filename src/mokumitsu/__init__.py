@@ -9,6 +9,13 @@ from __future__ import annotations
 
 from . import geometry
 from .comfort import Comfort, Thresholds, comfort, open_mask
+from .design import (
+    JointDesignBaseline,
+    JointDesignEvaluation,
+    evaluate_joint_design,
+    joint_design_cache_key,
+    prepare_joint_design_baseline,
+)
 from .district import (
     ARTICLE_42_1,
     ARTICLE_42_2,
@@ -56,16 +63,19 @@ from .fire import (
 )
 from .joint_renewal import (
     JointBuildingPlacement,
+    JointDesignParameters,
     JointOpenSpace,
     JointRenewalCandidate,
     JointRenewalPlan,
     JointRenewalPolicy,
     JointRenewalStep,
     apply_joint_redevelopment,
+    default_joint_design_parameters,
     joint_redevelopment_variants,
     joint_renewal_candidates,
     joint_wind_objective,
     optimize_joint_renewal,
+    parameterized_joint_redevelopment,
 )
 from .model import FnoModel, load_model
 from .organic import generate_organic_mokumitsu
@@ -93,8 +103,10 @@ from .wind import (
     WindDirection,
     WindZoneMetrics,
     add_wind_to_trajectory,
+    district_wind_base_masks,
     district_wind_masks,
     evaluate_district_wind,
+    evaluate_district_wind_with_field,
     predict_directional_wind,
 )
 
@@ -113,6 +125,9 @@ __all__ = [
     "FnoModel",
     "Frontage",
     "JointBuildingPlacement",
+    "JointDesignBaseline",
+    "JointDesignEvaluation",
+    "JointDesignParameters",
     "JointOpenSpace",
     "JointProjectCost",
     "JointRenewalFeasibilityPhase",
@@ -152,8 +167,12 @@ __all__ = [
     "build_fire_graph",
     "comfort",
     "district_summary",
+    "district_wind_base_masks",
     "district_wind_masks",
+    "default_joint_design_parameters",
     "evaluate_district_wind",
+    "evaluate_district_wind_with_field",
+    "evaluate_joint_design",
     "evaluate_joint_renewal_feasibility",
     "evaluate_joint_renewal_pareto",
     "fire_aware_renewal_priorities",
@@ -162,6 +181,7 @@ __all__ = [
     "generate_organic_mokumitsu",
     "geometry",
     "joint_redevelopment_variants",
+    "joint_design_cache_key",
     "joint_renewal_candidates",
     "joint_wind_objective",
     "load_district",
@@ -170,7 +190,9 @@ __all__ = [
     "open_mask",
     "optimize_joint_renewal",
     "pareto_front",
+    "parameterized_joint_redevelopment",
     "predict_directional_wind",
+    "prepare_joint_design_baseline",
     "renewal_priorities",
     "road_adjacency",
     "save_district",

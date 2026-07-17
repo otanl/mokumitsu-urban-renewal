@@ -21,7 +21,8 @@ core does not import hou. Realistic CFD verification is delegated to the separat
 ## Status
 
 Version 0.1 is complete as a reproducible **synthetic research prototype and
-Houdini sample**, not as a validated planning or regulatory tool.
+Houdini sample**, not as a validated planning or regulatory tool. The first v0.2
+slice adds live, editable joint-redevelopment screening inside Houdini.
 
 | Capability | Status |
 |---|---|
@@ -32,12 +33,14 @@ Houdini sample**, not as a validated planning or regulatory tool.
 | Two-to-four-parcel joint renewal and Pareto screening | Implemented |
 | Phased rights, relocation, dwellings, open space and scenario cost | Implemented |
 | Cached Houdini delivery and wind-field timelines | Included |
+| Live joint massing edits with automatic FNO/fire re-evaluation | Implemented; warm synchronous preview |
+| Public residential FNO weights, metadata and XLB training dataset | Release-hosted with SHA-256 manifest |
 | XLB verification of shortlisted designs | Scripted through houdini-xlb |
 | Real cadastral ingestion and empirical calibration | Not yet implemented |
 
-The main scientific gaps are real-district calibration, public distribution of
-the trained wind checkpoint, multi-seed XLB validation, uncertainty analysis,
-and validation of fire, cost and legal assumptions. See
+The main scientific gaps are real-district calibration, multi-seed XLB
+validation, uncertainty analysis, and validation of fire, cost and legal
+assumptions. See
 [Project status and roadmap](docs/ROADMAP.md).
 
 ## Repository layout
@@ -45,7 +48,8 @@ and validation of fire, cost and legal assumptions. See
     src/mokumitsu/   Houdini-independent district, fire, wind and renewal code
     scripts/         Reproducible experiments and XLB verification entry points
     houdini/         Optional HIP builders; importing the package never needs hou
-    examples/        Two HIP scenes and small precomputed File Cache sequences
+    examples/        Three HIP scenes and two small precomputed playback caches
+    models/          Release manifest, checksums, license and model release notes
     tests/           CPU-runnable unit and integration tests
     docs/            Research method, related work, architecture and roadmap
 
@@ -82,11 +86,18 @@ flag-shaped access conditions. The optional grid mode exists only as a control.
 
 Wind commands require a TorchScript FNO and its JSON metadata:
 
-    checkpoints\fno_residential_ts.pt
-    checkpoints\fno_residential_ts.json
+    .venv\Scripts\python.exe scripts\download_models.py --profile portable
 
-The model is intentionally not stored in Git. Point the project to an external
-artifact directory when needed:
+The live CUDA worker uses the original NeuralOperator checkpoint. Download both
+runtime forms with:
+
+    .venv\Scripts\python.exe scripts\download_models.py --profile all
+
+Add `--include-dataset` to also download the 500-sample XLB training set.
+The downloader verifies exact byte sizes and SHA-256 values from
+[models/manifest.json](models/manifest.json). Large artifacts remain outside Git
+in `checkpoints/` and `data/`. A different model directory can be selected
+before downloading:
 
     $env:MOKUMITSU_CHECKPOINT_DIR = "D:\models\mokumitsu"
 
@@ -104,24 +115,57 @@ silently substitute a different checkpoint family.
 The repository includes scenes generated and verified with Houdini Indie
 20.5.684:
 
+- [Live joint-design study](examples/houdini_joint_design.hip): edit the selected
+  two-to-four-parcel project, building position, coverage, aspect, rotation,
+  floors, road dedication, ventilation corridor and shared-open-space policy.
+  FNO wind, stochastic fire, floor-area retention and open-space metrics update
+  automatically; there is no analysis Run button.
 - [Joint feasibility timeline](examples/houdini_joint_feasibility.hip): baseline
   plus three joint-renewal projects, rights/cost/dwelling HUD, delivered open
   space, and a cached FNO U/U0 heatmap controlled by WIND_DISPLAY_TOGGLE.
 - [District renewal timeline](examples/houdini_mokumitsu.hip): building age,
   access, fire and wind screening across staged individual renewal.
 
-The adjacent examples/cache directory contains small bgeo.sc sequences, so the
-scenes can be inspected without rerunning FNO, fire simulation or optimization.
-The cached wind field is a scalar FNO screening result, not an XLB vector field.
+The two timeline scenes use small bgeo.sc sequences in examples/cache, so they
+can be inspected without rerunning FNO, fire simulation or optimization. The
+live scene instead writes content-addressed bgeo.sc files for edited designs to
+`$HIP/cache/joint_design`; those generated files remain outside Git. In every
+scene the wind field is a scalar FNO screening result, not an XLB vector field.
+
+For the live scene, install the optional NeuralOperator runtime in the project
+environment and point Houdini to that Python:
+
+    uv pip install -e ".[dev,viz,interactive]"
+    $env:MOKUMITSU_CHECKPOINT_DIR = "D:\models\mokumitsu"
+    $env:MOKUMITSU_PYTHON = "$PWD\.venv\Scripts\python.exe"
+
+The persistent external worker uses `fno_residential_xlb.pt` and CUDA when
+available. It pays model and district initialization once, then keeps subsequent
+edits warm. If the worker is disabled, Houdini can use the portable
+`fno_residential_ts.pt` plus JSON metadata on CPU. Missing or incompatible
+models are reported explicitly and geometry remains editable. Model artifacts
+are published under the repository's MIT license in the
+[residential model release](https://github.com/otanl/mokumitsu-urban-renewal/releases/tag/models-residential-v1).
 
 To rebuild locally:
 
     $HYTHON = "C:\Program Files\Side Effects Software\Houdini 20.5.xxx\bin\hython.exe"
     .venv\Scripts\python.exe scripts\evaluate_joint_feasibility.py --include-districts
+    & $HYTHON houdini\build_joint_design_hip.py
     & $HYTHON houdini\build_joint_feasibility_hip.py
     & $HYTHON houdini\build_mokumitsu_hip.py
 
 Rebuilding wind-dependent scenes requires the checkpoint described above.
+The live path can be checked headlessly and benchmarked with:
+
+    & $HYTHON houdini\verify_joint_design_hip.py
+    .venv\Scripts\python.exe scripts\bench_joint_design_worker.py
+
+The released XLB dataset can be used to retrain and export both runtime forms:
+
+    .venv\Scripts\python.exe scripts\download_models.py --profile all --include-dataset
+    .venv\Scripts\python.exe scripts\train_residential_fno.py --best
+    .venv\Scripts\python.exe scripts\export_residential_torchscript.py
 
 ## Optional XLB verification
 
@@ -153,9 +197,12 @@ remain in Japanese to avoid flattening domain-specific terminology.
 
 ## Scope decision
 
-The next priority is **interactive parametric design inside Houdini**, backed by
-cached FNO previews and explicit XLB verification, while keeping all objectives
-and constraints in the Mokumitsu research core.
+The first **interactive parametric design inside Houdini** slice is now in place:
+the same core evaluator serves Python and Houdini, preview cache keys include
+geometry, scenario, policy and model identity, and a persistent worker avoids
+per-edit model startup. The next priority is a Pareto candidate browser,
+preview/verification provenance, an explicit XLB action, and asynchronous or
+debounced evaluation for heavier studies.
 
 A third, generic environmental multi-objective optimization repository will not
 be created yet. It should be extracted only after at least two independent design

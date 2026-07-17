@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- explicit joint-design parameters for position, coverage, aspect, rotation and
+  floors, with invalid inputs rejected instead of silently repaired;
+- a reusable baseline/design evaluator shared by Python and Houdini;
+- deterministic cache keys covering district, geometry, policy, scenarios and
+  model identity;
+- a live Houdini joint-redevelopment scene with automatic wind, fire, capacity
+  and open-space feedback;
+- a persistent external NeuralOperator worker with CUDA support, warm baseline
+  reuse and content-addressed bgeo.sc display caches;
+- headless HIP verification and a worker benchmark script;
+- release-hosted portable and accelerated residential FNO checkpoints plus the
+  500-sample XLB training dataset;
+- an MIT-licensed asset manifest with exact byte sizes and SHA-256 values;
+- verified model download, FNO retraining and TorchScript export scripts.
+
+### Changed
+
+- district wind evaluation can reuse static masks and return the visualization
+  field in the same pass;
+- fire graph construction uses precomputed footprints and Shapely STRtree
+  neighbourhood queries.
+
 ## 0.1.0 - 2026-07-17
 
 Initial public research snapshot.

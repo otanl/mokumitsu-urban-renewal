@@ -87,6 +87,25 @@ class JointRenewalCandidate:
 
 
 @dataclass(frozen=True)
+class JointDesignParameters:
+    """Editable massing controls for one connected joint-renewal site.
+
+    ``center_u`` and ``center_v`` are normalized over the setback developable
+    bounding box. ``building_coverage`` is measured against the developable
+    parcel after any road dedication. Width and depth follow from coverage and
+    ``aspect_ratio``; this keeps the Houdini controls compact while still
+    exposing position, footprint, proportion, orientation and height.
+    """
+
+    center_u: float = 0.5
+    center_v: float = 0.5
+    building_coverage: float = 0.30
+    aspect_ratio: float = 1.5
+    rotation_deg: float = 0.0
+    floors: int = 4
+
+
+@dataclass(frozen=True)
 class JointOpenSpace:
     """A polygon reserved by one joint-renewal land-allocation alternative."""
 
@@ -299,6 +318,138 @@ def joint_redevelopment_variants(
         )
         for placement in placements
     )
+
+
+def default_joint_design_parameters(
+    district: MokumitsuDistrict,
+    candidate: JointRenewalCandidate,
+    policy: JointRenewalPolicy | None = None,
+    wind_direction_deg: float = 0.0,
+) -> JointDesignParameters:
+    """Return a known-feasible editable parameter set for ``candidate``."""
+    policy = policy or JointRenewalPolicy()
+    variants = joint_redevelopment_variants(
+        district,
+        candidate,
+        policy,
+        wind_direction_deg=wind_direction_deg,
+    )
+    if not variants:
+        raise ValueError("candidate has no feasible joint-redevelopment placement")
+    placement = next(
+        (placement for _, placement in variants if placement.variant == "central"),
+        variants[0][1],
+    )
+    selected = tuple(district.parcel(parcel_id) for parcel_id in candidate.parcel_ids)
+    merged = unary_union([Polygon(parcel.polygon) for parcel in selected])
+    _, _, developable = _road_widening_allocation(
+        district,
+        selected,
+        merged,
+        candidate,
+        policy,
+    )
+    usable = _setback_developable(developable, policy.parcel_setback_m)
+    min_x, min_y, max_x, max_y = usable.bounds
+    span_x = max(max_x - min_x, 1e-9)
+    span_y = max(max_y - min_y, 1e-9)
+    return JointDesignParameters(
+        center_u=float((placement.cx - min_x) / span_x),
+        center_v=float((placement.cy - min_y) / span_y),
+        building_coverage=float(placement.footprint_m2 / developable.area),
+        aspect_ratio=float(placement.width_m / placement.depth_m),
+        rotation_deg=float(math.degrees(placement.theta) % 180.0),
+        floors=placement.floors,
+    )
+
+
+def parameterized_joint_redevelopment(
+    district: MokumitsuDistrict,
+    candidate: JointRenewalCandidate,
+    parameters: JointDesignParameters,
+    policy: JointRenewalPolicy | None = None,
+    wind_direction_deg: float = 0.0,
+) -> tuple[MokumitsuDistrict, JointBuildingPlacement]:
+    """Build one explicitly controlled joint-renewal alternative.
+
+    The function does not silently move or shrink an infeasible request. That is
+    important in an editor: a red/invalid state is more informative than a
+    geometry repair that makes the sliders cease to describe the shown design.
+    """
+    policy = policy or JointRenewalPolicy()
+    _validate_policy(policy)
+    _validate_design_parameters(parameters, policy)
+    parcels = {parcel.id: parcel for parcel in district.parcels}
+    try:
+        selected = tuple(parcels[parcel_id] for parcel_id in candidate.parcel_ids)
+    except KeyError as exc:
+        raise ValueError(f"candidate references missing parcel {exc.args[0]}") from exc
+    merged = unary_union([Polygon(parcel.polygon) for parcel in selected])
+    if merged.geom_type != "Polygon" or merged.interiors:
+        raise ValueError("joint parcels must form one simply connected polygon")
+
+    access_road, road_space, developable = _road_widening_allocation(
+        district,
+        selected,
+        merged,
+        candidate,
+        policy,
+    )
+    usable = _setback_developable(developable, policy.parcel_setback_m)
+    min_x, min_y, max_x, max_y = usable.bounds
+    center_x = min_x + parameters.center_u * (max_x - min_x)
+    center_y = min_y + parameters.center_v * (max_y - min_y)
+    footprint = parameters.building_coverage * developable.area
+    width = math.sqrt(footprint * parameters.aspect_ratio)
+    depth = footprint / width
+    theta = math.radians(parameters.rotation_deg) % math.pi
+    building_shape = _oriented_rectangle(center_x, center_y, width, depth, theta)
+    if not usable.buffer(1e-8).covers(building_shape):
+        raise ValueError(
+            "requested building does not fit the setback developable parcel; "
+            "adjust position, coverage, aspect ratio or rotation"
+        )
+
+    joint_parcel_id, joint_building_id = _joint_ids(candidate.parcel_ids)
+    open_spaces = [road_space] if road_space is not None else []
+    corridor = _wind_corridor_space(
+        developable,
+        building_shape,
+        access_road,
+        joint_parcel_id,
+        policy,
+        math.radians(wind_direction_deg),
+    )
+    if corridor is not None:
+        open_spaces.append(corridor)
+    shared_space = _shared_open_space(
+        developable,
+        building_shape,
+        tuple(open_spaces),
+        candidate,
+        joint_parcel_id,
+        policy,
+    )
+    if shared_space is not None:
+        open_spaces.append(shared_space)
+
+    placement = JointBuildingPlacement(
+        variant="interactive",
+        joint_parcel_id=joint_parcel_id,
+        joint_building_id=joint_building_id,
+        cx=float(center_x),
+        cy=float(center_y),
+        width_m=float(width),
+        depth_m=float(depth),
+        theta=float(theta),
+        floors=int(parameters.floors),
+        height_m=float(parameters.floors * policy.floor_height_m + 0.5),
+        footprint_m2=float(footprint),
+        floor_area_m2=float(footprint * parameters.floors),
+        local_building_coverage=float(parameters.building_coverage),
+        open_spaces=tuple(open_spaces),
+    )
+    return apply_joint_redevelopment(district, candidate, placement, policy), placement
 
 
 def apply_joint_redevelopment(
@@ -522,6 +673,17 @@ def _connected_parcel_sets(
     return tuple(sorted(clusters, key=lambda ids: (len(ids), tuple(sorted(ids)))))
 
 
+def _setback_developable(shape: Polygon, setback_m: float) -> Polygon:
+    usable = shape.buffer(-setback_m)
+    if usable.is_empty:
+        usable = shape
+    if usable.geom_type == "MultiPolygon":
+        usable = max(usable.geoms, key=lambda polygon: polygon.area)
+    if usable.geom_type != "Polygon":
+        raise ValueError("setback developable area is not a simple polygon")
+    return usable
+
+
 def _placement_options(
     shape: Polygon,
     candidate: JointRenewalCandidate,
@@ -531,12 +693,9 @@ def _placement_options(
     access_road: RoadSegment | None = None,
     base_spaces: tuple[JointOpenSpace, ...] = (),
 ) -> tuple[JointBuildingPlacement, ...]:
-    usable = shape.buffer(-policy.parcel_setback_m)
-    if usable.is_empty:
-        usable = shape
-    if usable.geom_type == "MultiPolygon":
-        usable = max(usable.geoms, key=lambda polygon: polygon.area)
-    if usable.geom_type != "Polygon":
+    try:
+        usable = _setback_developable(shape, policy.parcel_setback_m)
+    except ValueError:
         return ()
 
     first_floors = max(
@@ -1039,6 +1198,29 @@ def joint_wind_objective(wind: DistrictWindMetrics) -> float:
         + 0.35 * zones["building_edge"].strong_fraction
         + 0.15 * zones["all_outdoor"].strong_fraction
     )
+
+
+def _validate_design_parameters(
+    parameters: JointDesignParameters,
+    policy: JointRenewalPolicy,
+) -> None:
+    values = (
+        parameters.center_u,
+        parameters.center_v,
+        parameters.building_coverage,
+        parameters.aspect_ratio,
+        parameters.rotation_deg,
+    )
+    if any(not math.isfinite(value) for value in values):
+        raise ValueError("joint design parameters must be finite")
+    if not 0.0 <= parameters.center_u <= 1.0 or not 0.0 <= parameters.center_v <= 1.0:
+        raise ValueError("center_u and center_v must lie in [0, 1]")
+    if not 0.0 < parameters.building_coverage < 1.0:
+        raise ValueError("building_coverage must lie between zero and one")
+    if parameters.aspect_ratio <= 0.0:
+        raise ValueError("aspect_ratio must be positive")
+    if not policy.minimum_floors <= parameters.floors <= policy.maximum_floors:
+        raise ValueError("floors must lie within the joint-renewal policy limits")
 
 
 def _validate_policy(policy: JointRenewalPolicy) -> None:

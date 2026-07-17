@@ -3,9 +3,10 @@
 ## English summary
 
 Version 0.1 is a complete synthetic research prototype, but not a calibrated
-planning tool. The next release should improve interactive parametric design in
-Houdini while preserving the separation between fast FNO screening and XLB
-verification. A generic environmental multi-objective framework should be
+planning tool. The first v0.2 slice now provides live parametric joint design in
+Houdini, a shared Python evaluator, deterministic cache keys and a persistent
+preview worker. Pareto browsing, provenance and explicit XLB actions remain.
+A generic environmental multi-objective framework should be
 extracted only after a second independent design domain proves the same evaluator
 contract.
 
@@ -19,6 +20,7 @@ Mokumitsuは、次の意味ではいったん完成とする。
 - 火災、夏季風、床面積、接道解消、連続空地、権利者数を同じ候補上で評価できる。
 - 共同建替えを期別の権利変換、仮移転、住戸容量、概算費用へ展開できる。
 - Houdiniで更新順序とキャッシュ済みFNO風速比を再生できる。
+- Houdiniで共同建替え形状を編集し、FNO・火災・床面積・空地を自動再評価できる。
 - 最終候補を別リポジトリのXLBで再計算する経路がある。
 - CPUテストで研究コアの主要な不変条件を確認できる。
 
@@ -78,7 +80,7 @@ Mokumitsuは、次の意味ではいったん完成とする。
 
 ### v0.2 — Houdini内のインタラクティブ性能設計
 
-次に優先する。単にスライダーを増やすのではなく、判断過程を見えるようにする。
+進行中。単にスライダーを増やすのではなく、判断過程を見えるようにする。
 
 - 建物位置、高さ、共同化範囲、空地形状をパラメトリックに編集する。
 - 編集中はFNO・火災の高速previewを遅延実行または非同期実行する。
@@ -90,11 +92,21 @@ Mokumitsuは、次の意味ではいったん完成とする。
 
 成果物:
 
-- evaluator protocol
-- Houdini parameter-to-evaluator adapter
-- Pareto candidate browser
-- preview/verification provenance panel
-- 同一候補をCLIとHoudiniで再現するテスト
+- [x] baselineと設計案を比較するHoudini非依存evaluator
+- [x] geometry・scenario・policy・model identityを含む決定論的cache key
+- [x] Houdini parameter-to-evaluator adapter
+- [x] 常駐project-Python workerによるCUDA/CPU preview
+- [x] 同一候補・同一key・cache復帰を確認する単体／headless HIPテスト
+- [x] FNO checkpoint・XLB学習データのRelease配布とSHA-256 manifest
+- [ ] Pareto candidate browser
+- [ ] preview/verification provenance panel
+- [ ] 明示的なXLB検証操作と結果の固定
+- [ ] 重い評価向けのdebounceまたは非同期cook
+
+現状のworkerは同期cookだが、モデル、街区、基準案、風maskをprocess内に保持し、
+編集後のwarm previewを短縮する。初回起動は依然として重く、Houdini UIを完全に
+非同期化したわけではない。「real-time CFD」ではなく「interactive screening」
+として扱う。
 
 ### v0.3 — 研究妥当性
 
@@ -123,10 +135,10 @@ v0.3の評価基盤が安定してから候補にする。
 
 | 優先度 | 課題 | 影響 | 対応 |
 |---|---|---|---|
-| 高 | 学習済みFNOをGit外でどう配布するか未決定 | clone直後に風の再計算ができない | release assetまたはmodel registryとhash manifestを用意 |
 | 高 | 実地区較正がない | 形態・火災・費用の外的妥当性が不明 | 公開GISによるcase study |
 | 高 | FNO最適化候補のXLB検証数が少ない | surrogate exploitationを否定できない | seed・風向を増やしたvalidation matrix |
-| 中 | Houdini編集と評価が同期cook中心 | 重い評価で対話性が落ちる | debounce、background worker、cache key |
+| 中 | 公開model assetが合計約583 MB | 初回取得に時間がかかる | portable/accelerated profileを分け、将来は小型化も比較 |
+| 中 | 常駐workerとcache後もHoudini cook自体は同期 | 初回起動や重い評価でUIが待つ | 実装済みwarm worker/keyed cacheに加え、debounceまたは非同期結果反映 |
 | 中 | 目的値の意味が画面だけでは伝わりにくい | 結果を「最適解」と誤読しやすい | zone overlay、凡例、provenance、比較表 |
 | 中 | 火災と風が別のscreening model | 複合災害の相互作用を表していない | まず個別較正後に連成の必要性を評価 |
 | 低 | 汎用optimizerの抽出 | 現段階では保守負担が増える | v0.2以降の実績で再判断 |
