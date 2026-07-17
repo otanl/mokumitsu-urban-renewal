@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.hip binary
+*.hiplc binary
+*.bgeo.sc binary
+*.png binary
+*.jpg binary
+*.gif binary
