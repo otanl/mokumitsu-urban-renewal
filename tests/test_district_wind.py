@@ -148,6 +148,43 @@ def test_invalid_direction_and_non_square_site_are_rejected(district):
         evaluate_district_wind(replace(district, width_m=120.0), model=_FakeModel())
 
 
+def test_real_model_metadata_must_match_the_physical_scenario(district):
+    scenario = SummerWindScenario()
+    model = _FakeModel()
+    model.meta = {
+        "physics": {
+            "contract_version": 1,
+            "height_encoding": "fraction_of_domain_height",
+            "domain_length_x_m": district.width_m,
+            "domain_length_y_m": district.height_m,
+            "domain_height_m": scenario.domain_height_m,
+            "reference_height_m": scenario.reference_height_m,
+            "pedestrian_height_m": scenario.pedestrian_height_m,
+            "backend_signature": "unit-test-backend",
+            "output_grid": [model.ny, model.nx],
+            "grid_verification": {
+                "passed": True,
+                "compatible": True,
+                "override": False,
+            },
+        },
+        "dataset_sha256": "a" * 64,
+        "split": {
+            "train_indices": [0],
+            "validation_indices": [1],
+            "test_indices": [2],
+        },
+    }
+    evaluate_district_wind(district, scenario, model)
+
+    model.meta["physics"]["domain_height_m"] = 40.0
+    with pytest.raises(ValueError, match="does not match scenario"):
+        evaluate_district_wind(district, scenario, model)
+    model.meta = {}
+    with pytest.raises(ValueError, match="lacks the physical wind contract"):
+        evaluate_district_wind(district, scenario, model)
+
+
 def test_wind_metrics_attach_to_every_renewal_phase_without_changing_geometry(district):
     trajectory = simulate_renewal_trajectory(
         district,

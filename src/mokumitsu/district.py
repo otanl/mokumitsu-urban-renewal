@@ -274,23 +274,41 @@ class MokumitsuDistrict:
     def access(self, parcel_id: str) -> AccessAssessment:
         return assess_access(self, self.parcel(parcel_id))
 
-    def normalized_rects(self) -> list[tuple[float, float, float, float, float, float]]:
-        """Buildings in the normalized ``(cx, cy, w, d, h, theta)`` wind-field contract."""
-        scale_z = max(self.width_m, self.height_m)
+    def normalized_rects(
+        self,
+        domain_height_m: float = 60.0,
+    ) -> list[tuple[float, float, float, float, float, float]]:
+        """Buildings in the normalized (cx, cy, w, d, h, theta) wind contract.
+
+        Horizontal coordinates are normalized by the district plan dimensions;
+        building heights are normalized by the explicitly physical CFD domain
+        height. Mixing those scales silently flattened the former wind geometry.
+        """
+
+        if not np.isfinite(domain_height_m) or domain_height_m <= 0:
+            raise ValueError("domain_height_m must be finite and positive")
+        tallest = max((building.height_m for building in self.buildings), default=0.0)
+        if tallest >= domain_height_m:
+            raise ValueError("domain_height_m must exceed the tallest building")
         return [
             (
                 b.cx / self.width_m,
                 b.cy / self.height_m,
                 b.width_m / self.width_m,
                 b.depth_m / self.height_m,
-                b.height_m / scale_z,
+                b.height_m / domain_height_m,
                 b.theta,
             )
             for b in self.buildings
         ]
 
-    def heightmap(self, res: int = 128) -> np.ndarray:
-        return geometry.rasterize(self.normalized_rects(), res, res, L=1.0)
+    def heightmap(self, res: int = 128, domain_height_m: float = 60.0) -> np.ndarray:
+        return geometry.rasterize(
+            self.normalized_rects(domain_height_m),
+            res,
+            res,
+            L=1.0,
+        )
 
     def summary(self) -> DistrictSummary:
         return district_summary(self)

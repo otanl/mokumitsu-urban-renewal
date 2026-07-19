@@ -57,7 +57,18 @@ class AcceleratedFnoModel:
         )
         self.meta = {
             key: checkpoint[key]
-            for key in ("xmean", "xstd", "ymean", "ystd", "ny", "nx", "sharpness")
+            for key in (
+                "xmean",
+                "xstd",
+                "ymean",
+                "ystd",
+                "ny",
+                "nx",
+                "sharpness",
+                "physics",
+                "dataset_sha256",
+                "split",
+            )
             if key in checkpoint
         }
         self.meta.setdefault("xmean", 0.0)
@@ -109,6 +120,9 @@ class AcceleratedFnoModel:
             "sha256": self._sha256 if include_hash else None,
             "grid": [self.ny, self.nx],
             "device": str(self.device),
+            "physics": self.meta.get("physics"),
+            "dataset_sha256": self.meta.get("dataset_sha256"),
+            "split": self.meta.get("split"),
         }
 
 

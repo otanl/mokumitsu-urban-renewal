@@ -1,4 +1,4 @@
-"""Download release-hosted Mokumitsu model assets with SHA-256 verification."""
+"""Download release-hosted Mokumitsu assets with SHA-256 and status checks."""
 
 from __future__ import annotations
 
@@ -24,6 +24,11 @@ def load_manifest(path: Path) -> dict:
         raise ValueError("unsupported model manifest schema")
     if not str(manifest.get("download_base_url", "")).startswith("https://"):
         raise ValueError("manifest download_base_url must use HTTPS")
+    status = manifest.get("status", "active")
+    if status not in {"active", "quarantined"}:
+        raise ValueError(f"unsupported manifest status: {status!r}")
+    if status == "quarantined" and not str(manifest.get("status_reason", "")).strip():
+        raise ValueError("quarantined manifest must explain status_reason")
     assets = manifest.get("assets")
     if not isinstance(assets, list) or not assets:
         raise ValueError("manifest must contain at least one asset")
@@ -152,6 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data")
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
+        "--allow-quarantined",
+        action="store_true",
+        help="download invalid historical assets for reproduction/audit only",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print selected URLs and targets without downloading",
@@ -162,6 +172,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     manifest = load_manifest(args.manifest.resolve())
+    if manifest.get("status", "active") == "quarantined" and not args.allow_quarantined:
+        raise RuntimeError(
+            "this model release is quarantined and cannot be used for design evaluation: "
+            f"{manifest['status_reason']} Use --allow-quarantined only for historical "
+            "reproduction or audit."
+        )
     checkpoint_dir = args.checkpoint_dir
     if checkpoint_dir is None:
         configured = os.environ.get("MOKUMITSU_CHECKPOINT_DIR", "").strip()

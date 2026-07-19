@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 import hou
 
-project_root = Path(hou.expandString("$HIP")).resolve().parent
+project_root = Path(hou.getenv("HIP") or ".").resolve().parent
 for path in (project_root / "src", project_root / "houdini"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
@@ -61,7 +61,7 @@ import sys
 from pathlib import Path
 import hou
 
-project_root = Path(hou.expandString("$HIP")).resolve().parent
+project_root = Path(hou.getenv("HIP") or ".").resolve().parent
 for path in (project_root / "src", project_root / "houdini"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
@@ -74,7 +74,7 @@ import sys
 from pathlib import Path
 import hou
 
-project_root = Path(hou.expandString("$HIP")).resolve().parent
+project_root = Path(hou.getenv("HIP") or ".").resolve().parent
 for path in (project_root / "src", project_root / "houdini"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))

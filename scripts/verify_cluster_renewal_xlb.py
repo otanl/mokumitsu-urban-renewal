@@ -20,12 +20,15 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
+from houdini_xlb import XlbConfig  # noqa: E402
 from verify_joint_renewal_xlb import (  # noqa: E402
+    _display_speed,
     _evaluation_frame,
     _metric_changes,
     _normalized_rms,
     _predict_fno,
     _run_xlb,
+    _xlb_heightmap,
     _zone_metrics,
 )
 
@@ -159,7 +162,17 @@ def main() -> None:
         default=0,
         help="XLB horizontal lattice; 0 uses twice the FNO resolution",
     )
-    parser.add_argument("--gridz", type=int, default=64)
+    parser.add_argument(
+        "--gridz",
+        type=int,
+        default=0,
+        help="vertical lattice; 0 derives near-cubic cells from the physical domain",
+    )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=Path("artifacts/houdini/cache/mokumitsu-cluster-verify"),
+    )
     parser.add_argument("--out", default="outputs/cluster_renewal_xlb.json")
     parser.add_argument("--fig", default="outputs/cluster_renewal_xlb.png")
     args = parser.parse_args()
@@ -173,8 +186,23 @@ def main() -> None:
     if model.nx != res:
         raise ValueError("cluster-renewal XLB verification requires a square surrogate grid")
     gridxy = args.gridxy or 2 * res
-    grid_xyz = (gridxy, gridxy, args.gridz)
     scenario_defaults = SummerWindScenario()
+    dx = initial_district.width_m / gridxy
+    grid_y = round(initial_district.height_m / dx)
+    grid_z = args.gridz or round(scenario_defaults.domain_height_m / dx)
+    xlb_config = XlbConfig(
+        grid_x=gridxy,
+        grid_y=grid_y,
+        grid_z=grid_z,
+        steps=args.steps,
+        domain_length_x_m=initial_district.width_m,
+        domain_length_y_m=initial_district.height_m,
+        domain_height_m=scenario_defaults.domain_height_m,
+        reference_height_m=scenario_defaults.reference_height_m,
+        pedestrian_height_m=scenario_defaults.pedestrian_height_m,
+        average_window=min(800, args.steps),
+        average_every=100,
+    )
     edge_distance_m = scenario_defaults.building_edge_distance_m
     thresholds: Thresholds = scenario_defaults.thresholds
     fno_u0 = float(model.reference_speed())
@@ -183,27 +211,62 @@ def main() -> None:
         (
             direction,
             weight,
-            _evaluation_frame(initial_district, res, direction, edge_distance_m),
-            _evaluation_frame(final_district, res, direction, edge_distance_m),
+            _evaluation_frame(
+                initial_district,
+                res,
+                direction,
+                edge_distance_m,
+                scenario_defaults.domain_height_m,
+            ),
+            _evaluation_frame(
+                final_district,
+                res,
+                direction,
+                edge_distance_m,
+                scenario_defaults.domain_height_m,
+            ),
         )
         for direction, weight in directions
     ]
     print(
         f"recommended option {recommended['index']} "
         f"({len(recommended['candidate']['parcel_ids'])} parcels); "
-        f"running empty + {2 * len(frames)} before/after XLB cases on {grid_xyz} "
-        f"for {args.steps} steps",
+        f"running empty + {2 * len(frames)} before/after XLB cases on "
+        f"{xlb_config.grid_xyz} for {args.steps} steps at "
+        f"z={xlb_config.resolved_pedestrian_height_m:.2f} m",
         flush=True,
     )
-    empty_xlb = _run_xlb(np.zeros((res, res), np.float32), grid_xyz, args.steps)
-    xlb_u0 = float(empty_xlb.mean())
+    empty_xlb = _run_xlb(
+        np.zeros((xlb_config.grid_y, xlb_config.grid_x), np.float32),
+        xlb_config,
+        args.cache,
+    )
+    margin = max(1, round(5.0 / xlb_config.cell_sizes_m[0]))
+    xlb_u0 = float(empty_xlb[margin:-margin, margin:-margin].mean())
 
     rows = []
     for direction, weight, initial_frame, final_frame in frames:
         hm0, masks0 = initial_frame
         hm1, masks1 = final_frame
         fno_fields = (_predict_fno(model, hm0), _predict_fno(model, hm1))
-        xlb_fields = (_run_xlb(hm0, grid_xyz, args.steps), _run_xlb(hm1, grid_xyz, args.steps))
+        xlb_fields = (
+            _display_speed(
+                _run_xlb(
+                    _xlb_heightmap(initial_district, xlb_config, direction),
+                    xlb_config,
+                    args.cache,
+                ),
+                hm0,
+            ),
+            _display_speed(
+                _run_xlb(
+                    _xlb_heightmap(final_district, xlb_config, direction),
+                    xlb_config,
+                    args.cache,
+                ),
+                hm1,
+            ),
+        )
         fno_before = _zone_metrics(fno_fields[0], hm0, masks0, fno_u0, thresholds)
         fno_after = _zone_metrics(fno_fields[1], hm1, masks1, fno_u0, thresholds)
         xlb_before = _zone_metrics(xlb_fields[0], hm0, masks0, xlb_u0, thresholds)
@@ -279,7 +342,8 @@ def main() -> None:
         "wind_model": model_name,
         "model": model.provenance(),
         "resolution": res,
-        "xlb_grid_xyz": grid_xyz,
+        "xlb_config": xlb_config.to_dict(),
+        "xlb_resolved_pedestrian_height_m": xlb_config.resolved_pedestrian_height_m,
         "xlb_steps": args.steps,
         "building_edge_distance_m": edge_distance_m,
         "reference_speed": {"fno": fno_u0, "xlb": xlb_u0},

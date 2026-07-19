@@ -32,7 +32,7 @@ dependencies = [
 viz = ["matplotlib>=3.8,<4"]
 interactive = ["neuraloperator>=2,<3"]
 verify = [
-    "houdini-xlb[xlb] @ git+https://github.com/otanl/houdini-xlb.git@4e30c87aaf80a17fea192cde33ba04a81ff04c3d",
+    "houdini-xlb[xlb] @ git+https://github.com/otanl/houdini-xlb.git@0d49c20748c91bc6ab5983ecdf79f8a062d92eeb",
     "matplotlib>=3.8,<4",
 ]
 dev = ["pytest", "ruff"]

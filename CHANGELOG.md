@@ -14,17 +14,33 @@
 - a persistent external NeuralOperator worker with CUDA support, warm baseline
   reuse and content-addressed bgeo.sc display caches;
 - headless HIP verification and a worker benchmark script;
-- release-hosted portable and accelerated residential FNO checkpoints plus the
-  500-sample XLB training dataset;
-- an MIT-licensed asset manifest with exact byte sizes and SHA-256 values;
-- verified model download, FNO retraining and TorchScript export scripts.
+- a v2 physical-contract residential dataset generator, strict dataset validator
+  and XLB grid-independence gate;
+- asset-manifest quarantine status and an explicit audit-only download override;
+- train/validation/test-separated FNO training and provenance-preserving
+  TorchScript export paths for a future accepted dataset;
+- a reproducible, non-CFD README overview showing district generation,
+  access/age actions, graph-fire screening and combined renewal priority.
 
 ### Changed
 
 - district wind evaluation can reuse static masks and return the visualization
   field in the same pass;
 - fire graph construction uses precomputed footprints and Shapely STRtree
-  neighbourhood queries.
+  neighbourhood queries;
+- the residential-v1 dataset and both FNO checkpoints are quarantined after a
+  catastrophic finite XLB sample, inconsistent vertical scaling and test-split
+  checkpoint selection were found;
+- wind evaluation rejects legacy checkpoints without v2 physical provenance,
+  and the downloader refuses quarantined assets by default;
+- the corrected KBC forward protocol is blocked from dataset generation because
+  its current grid-independence report fails the acceptance tolerance;
+- bundled Houdini wind caches are labelled historical v1 visualization rather
+  than validated analysis;
+- bundled HIP Python SOPs resolve project paths from the HIP location instead of
+  retaining paths from the generating machine;
+- the optional verification dependency now pins the published physical-contract
+  `houdini-xlb` revision.
 
 ## 0.1.0 - 2026-07-17
 

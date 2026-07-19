@@ -87,6 +87,9 @@ class FnoModel:
             "torchscript_bytes": self.ts_path.stat().st_size,
             "sha256": self._sha256 if include_hash else None,
             "grid": [self.ny, self.nx],
+            "physics": self.meta.get("physics"),
+            "dataset_sha256": self.meta.get("dataset_sha256"),
+            "split": self.meta.get("split"),
         }
 
 

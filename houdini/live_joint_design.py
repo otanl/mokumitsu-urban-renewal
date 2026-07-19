@@ -366,7 +366,7 @@ def _cook_from_worker(
 ) -> None:
     checkpoint_dir = _checkpoint_dir(node)
     python = _worker_python(node)
-    project_root = Path(hou.expandString("$HIP")).resolve().parent
+    project_root = Path(hou.getenv("HIP") or ".").resolve().parent
     script = project_root / "scripts" / "joint_design_worker.py"
     if not script.exists():
         raise FileNotFoundError(f"joint-design worker script is missing: {script}")
@@ -440,7 +440,7 @@ def _worker_python(node: hou.Node) -> Path:
     if not raw or "$" in raw:
         raw = os.environ.get("MOKUMITSU_PYTHON", "").strip()
     if not raw:
-        project_root = Path(hou.expandString("$HIP")).resolve().parent
+        project_root = Path(hou.getenv("HIP") or ".").resolve().parent
         raw = str(project_root / ".venv" / "Scripts" / "python.exe")
     path = Path(raw).resolve()
     if not path.exists():
@@ -470,7 +470,7 @@ def _model(node: hou.Node, model_name: str):
 
 
 def _cache_path(key: str, display_resolution: int) -> Path:
-    hip_dir = Path(hou.expandString("$HIP")).resolve()
+    hip_dir = Path(hou.getenv("HIP") or ".").resolve()
     filename = f"{_HOUDINI_CACHE_SCHEMA}.{key}.r{display_resolution}.bgeo.sc"
     return hip_dir / "cache" / "joint_design" / filename
 

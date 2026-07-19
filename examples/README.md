@@ -56,20 +56,27 @@ indoor ventilation.
 Playback caches are included only for the two timeline examples. Newly generated
 caches, JSON outputs, checkpoints and datasets should remain outside Git.
 
-## Rebuilding
+## Portability and rebuilding
 
-From the repository root:
+The Python SOPs resolve `src`, `houdini` and the default cache directory from
+the HIP location at cook time; the checked-in HIP files therefore do not depend
+on paths from the machine that generated them. Set `MOKUMITSU_PYTHON` only when
+the project Python executable is outside the normal clone layout.
+
+There is currently no supported residential-wind checkpoint. The normal model
+downloader rejects the quarantined v1 release, and the wind fields bundled in
+the timeline caches are retained only as historical prototype output. Do not
+rebuild them or use them for design decisions.
+
+For provenance auditing only, the quarantined files can be fetched explicitly:
+
+    .venv/Scripts/python.exe scripts/download_models.py --profile all --allow-quarantined
+
+After a v2 model passes the documented grid-convergence, dataset and held-out
+validation gates, rebuild from the repository root with:
 
     uv pip install -e ".[dev,viz,interactive]"
-    $env:MOKUMITSU_CHECKPOINT_DIR = "D:\models\mokumitsu"
-    $env:MOKUMITSU_PYTHON = "$PWD\.venv\Scripts\python.exe"
-    .venv\Scripts\python.exe scripts\download_models.py --profile all
-    hython houdini\build_joint_design_hip.py
-    .venv\Scripts\python.exe scripts\evaluate_joint_feasibility.py --include-districts
-    hython houdini\build_joint_feasibility_hip.py
-    hython houdini\build_mokumitsu_hip.py
-
-The live worker requires fno_residential_xlb.pt. The embedded-Python fallback
-and the timeline builders require fno_residential_ts.pt and its JSON metadata.
-The verified downloader obtains them from the
-[residential model release](https://github.com/otanl/mokumitsu-urban-renewal/releases/tag/models-residential-v1).
+    hython houdini/build_joint_design_hip.py
+    .venv/Scripts/python.exe scripts/evaluate_joint_feasibility.py --include-districts
+    hython houdini/build_joint_feasibility_hip.py
+    hython houdini/build_mokumitsu_hip.py

@@ -65,6 +65,17 @@ def test_houdini_builder_drives_renewal_phases_from_timeline():
     assert 'file_cache.parm("execute").pressButton()' in builder
     assert 'file_cache.parm("loadfromdisk").set(1)' in builder
     assert 'geo.createNode("null", "OUT_MOKUMITSU")' in builder
+    assert 'hou.getenv("HIP")' in builder
+    assert 'hou.expandString("$HIP/../src")' not in builder
+
+
+def test_live_joint_design_embeds_no_build_machine_hip_path():
+    project = Path(__file__).parents[1]
+    builder = (project / "houdini" / "build_joint_design_hip.py").read_text(encoding="utf-8")
+    runtime = (project / "houdini" / "live_joint_design.py").read_text(encoding="utf-8")
+    assert 'hou.getenv("HIP")' in builder
+    assert 'hou.expandString("$HIP")' not in builder
+    assert 'hou.getenv("HIP")' in runtime
 
 
 def test_joint_feasibility_builder_is_a_separate_cached_timeline():
@@ -184,7 +195,11 @@ def test_json_roundtrip_and_wind_heightmap(tmp_path):
     heightmap = loaded.heightmap(64)
     assert heightmap.shape == (64, 64)
     assert heightmap.dtype == np.float32
-    assert heightmap.max() > 0
+    tallest = max(building.height_m for building in loaded.buildings)
+    assert heightmap.max() == pytest.approx(tallest / 60.0)
+    assert loaded.heightmap(64, 30.0).max() == pytest.approx(2 * heightmap.max())
+    with pytest.raises(ValueError, match="tallest building"):
+        loaded.heightmap(64, tallest)
 
 
 def test_road_graph_has_connected_network_and_dead_end_paths():

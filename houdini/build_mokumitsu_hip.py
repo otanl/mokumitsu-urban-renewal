@@ -19,7 +19,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 SOP_CODE = r"""
 import sys, math, os, hou, numpy as np
-sys.path.insert(0, hou.expandString("$HIP/../src"))
+from pathlib import Path
+
+hip_dir = Path(hou.getenv("HIP") or ".").resolve()
+project_root = hip_dir.parent
+sys.path.insert(0, str(project_root / "src"))
 from mokumitsu import generate_mokumitsu, morphology_summary
 from mokumitsu.fire import FireScenario, simulate_fire_spread, fire_aware_renewal_priorities
 from mokumitsu.renewal import RenewalPolicy, simulate_renewal_trajectory
@@ -58,7 +62,7 @@ wind_direction = float(node.parm("summer_wind_dir").evalAsString())
 S = hou.session
 if not hasattr(S, "_mokumitsu_district_model"):
     checkpoint_dir = os.environ.get(
-        "MOKUMITSU_CHECKPOINT_DIR", hou.expandString("$HIP/../checkpoints")
+        "MOKUMITSU_CHECKPOINT_DIR", str(project_root / "checkpoints")
     )
     S._mokumitsu_district_model = load_model("residential", ckpt_dir=checkpoint_dir)
     S._mokumitsu_district_u0 = S._mokumitsu_district_model.reference_speed()

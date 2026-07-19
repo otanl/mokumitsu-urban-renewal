@@ -37,6 +37,9 @@ class SummerWindScenario:
     model_name: str = "residential"
     thresholds: Thresholds = Thresholds()
     building_edge_distance_m: float = 3.0
+    domain_height_m: float = 60.0
+    reference_height_m: float = 10.0
+    pedestrian_height_m: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -98,16 +101,18 @@ def evaluate_district_wind_with_field(
     model = model or load_model(scenario.model_name)
     res = int(model.ny)
     _validate_square_grid(district, model)
+    _validate_model_physics(district, scenario, model)
     u0 = float(reference_speed if reference_speed is not None else model.reference_speed())
     if not math.isfinite(u0) or u0 <= 0:
         raise ValueError("surrogate reference speed must be positive")
 
-    heightmap = district.heightmap(res)
+    heightmap = district.heightmap(res, scenario.domain_height_m)
     masks = district_wind_masks(
         district,
         res,
         building_edge_distance_m=scenario.building_edge_distance_m,
         base_masks=base_masks,
+        domain_height_m=scenario.domain_height_m,
     )
     total_weight = sum(direction.weight for direction in scenario.directions)
     directional = []
@@ -154,18 +159,27 @@ def predict_directional_wind(
     model_name: str = "residential",
     reference_speed: float | None = None,
     building_edge_distance_m: float = 3.0,
+    domain_height_m: float = 60.0,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray], float]:
     """Return ``(speed, heightmap, masks, u0)`` in the rotated evaluation frame."""
     _quarter_turn(direction_deg)
     model = model or load_model(model_name)
     _validate_square_grid(district, model)
+    _validate_model_physics(
+        district,
+        SummerWindScenario(model_name=model_name, domain_height_m=domain_height_m),
+        model,
+    )
     res = int(model.ny)
     k = int(round(direction_deg / 90.0)) % 4
-    heightmap = np.rot90(district.heightmap(res), k=k).copy()
+    heightmap = np.rot90(district.heightmap(res, domain_height_m), k=k).copy()
     masks = {
         name: np.rot90(mask, k=k).copy()
         for name, mask in district_wind_masks(
-            district, res, building_edge_distance_m=building_edge_distance_m
+            district,
+            res,
+            building_edge_distance_m=building_edge_distance_m,
+            domain_height_m=domain_height_m,
         ).items()
     }
     u0 = float(reference_speed if reference_speed is not None else model.reference_speed())
@@ -191,13 +205,14 @@ def weighted_world_wind_ratio(
     _validate_scenario(scenario)
     model = model or load_model(scenario.model_name)
     _validate_square_grid(district, model)
+    _validate_model_physics(district, scenario, model)
     u0 = float(reference_speed if reference_speed is not None else model.reference_speed())
     if not math.isfinite(u0) or u0 <= 0:
         raise ValueError("surrogate reference speed must be positive")
 
     total_weight = sum(direction.weight for direction in scenario.directions)
     ratio = np.zeros((int(model.ny), int(model.nx)), dtype=np.float32)
-    world_heightmap = district.heightmap(int(model.ny))
+    world_heightmap = district.heightmap(int(model.ny), scenario.domain_height_m)
     for direction in scenario.directions:
         k = _quarter_turn(direction.direction_deg)
         rotated_heightmap = np.rot90(world_heightmap, k=k).copy()
@@ -236,6 +251,7 @@ def district_wind_masks(
     res: int,
     building_edge_distance_m: float = 3.0,
     base_masks: dict[str, np.ndarray] | None = None,
+    domain_height_m: float = 60.0,
 ) -> dict[str, np.ndarray]:
     """Rasterize outdoor analysis zones on the same square grid as the surrogate."""
     if res <= 0 or building_edge_distance_m <= 0:
@@ -247,7 +263,7 @@ def district_wind_masks(
     parcel = np.asarray(base_masks["parcels"], dtype=bool)
     if road.shape != (res, res) or parcel.shape != (res, res):
         raise ValueError("base-mask shapes must match the wind grid")
-    heightmap = district.heightmap(res)
+    heightmap = district.heightmap(res, domain_height_m)
     building = heightmap > 1e-7
     open_cells = ~building
     edge = (
@@ -381,6 +397,73 @@ def _validate_square_grid(district: MokumitsuDistrict, model: FnoModel) -> None:
         raise ValueError("cardinal rotation currently requires a physically square district")
 
 
+def _validate_model_physics(
+    district: MokumitsuDistrict,
+    scenario: SummerWindScenario,
+    model: object,
+) -> None:
+    """Reject real checkpoints trained against a different geometry/height contract."""
+
+    meta = getattr(model, "meta", None)
+    if meta is None:
+        return  # Lightweight test doubles implement only the prediction protocol.
+    physics = meta.get("physics") if isinstance(meta, dict) else None
+    if not isinstance(physics, dict):
+        raise ValueError(
+            "surrogate checkpoint lacks the physical wind contract; regenerate the "
+            "dataset and checkpoint with the Mokumitsu v2 pipeline"
+        )
+    if physics.get("contract_version") != 1:
+        raise ValueError("unsupported surrogate physical contract version")
+    if physics.get("height_encoding") != "fraction_of_domain_height":
+        raise ValueError("surrogate uses an incompatible building-height encoding")
+    verification = physics.get("grid_verification")
+    if not (
+        isinstance(verification, dict)
+        and verification.get("passed") is True
+        and verification.get("compatible") is True
+        and verification.get("override") is False
+    ):
+        raise ValueError("surrogate was not trained from a passing physical-grid protocol")
+    if not str(physics.get("backend_signature", "")).strip():
+        raise ValueError("surrogate physical contract has no backend signature")
+    if physics.get("output_grid") != [int(model.ny), int(model.nx)]:
+        raise ValueError("surrogate physical output_grid does not match the loaded model")
+    dataset_sha256 = str(meta.get("dataset_sha256", "")).lower()
+    split = meta.get("split")
+    if (
+        len(dataset_sha256) != 64
+        or not all(character in "0123456789abcdef" for character in dataset_sha256)
+        or not isinstance(split, dict)
+    ):
+        raise ValueError("surrogate lacks dataset and train/validation/test provenance")
+    split_keys = {"train_indices", "validation_indices", "test_indices"}
+    if not split_keys.issubset(split):
+        raise ValueError("surrogate split provenance is incomplete")
+    try:
+        split_sets = [set(map(int, split[name])) for name in sorted(split_keys)]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("surrogate split indices must be integer sequences") from exc
+    if not all(split_sets) or any(
+        left & right for index, left in enumerate(split_sets) for right in split_sets[index + 1 :]
+    ):
+        raise ValueError("surrogate train/validation/test splits must be non-empty and disjoint")
+    expected = {
+        "domain_length_x_m": district.width_m,
+        "domain_length_y_m": district.height_m,
+        "domain_height_m": scenario.domain_height_m,
+        "reference_height_m": scenario.reference_height_m,
+        "pedestrian_height_m": scenario.pedestrian_height_m,
+    }
+    for field, value in expected.items():
+        try:
+            actual = float(physics[field])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"surrogate physical contract is missing {field}") from exc
+        if not math.isclose(actual, value, rel_tol=1e-6, abs_tol=1e-6):
+            raise ValueError(f"surrogate {field}={actual:g} does not match scenario {value:g}")
+
+
 def _quarter_turn(direction_deg: float) -> int:
     if not math.isfinite(direction_deg):
         raise ValueError("wind direction must be finite")
@@ -411,3 +494,14 @@ def _validate_scenario(scenario: SummerWindScenario) -> None:
         or scenario.building_edge_distance_m <= 0
     ):
         raise ValueError("building_edge_distance_m must be positive")
+    physical_heights = (
+        scenario.domain_height_m,
+        scenario.reference_height_m,
+        scenario.pedestrian_height_m,
+    )
+    if any(not math.isfinite(value) or value <= 0 for value in physical_heights):
+        raise ValueError("physical wind heights must be finite and positive")
+    if not scenario.reference_height_m < scenario.domain_height_m:
+        raise ValueError("reference_height_m must lie inside the wind domain")
+    if not scenario.pedestrian_height_m < scenario.domain_height_m:
+        raise ValueError("pedestrian_height_m must lie inside the wind domain")

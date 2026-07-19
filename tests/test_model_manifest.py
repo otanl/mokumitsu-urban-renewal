@@ -12,6 +12,8 @@ def test_model_manifest_has_unique_valid_assets():
     assert manifest["schema_version"] == 1
     assert manifest["release_tag"] == "models-residential-v1"
     assert manifest["license"] == "MIT"
+    assert manifest["status"] == "quarantined"
+    assert "index 374" in manifest["status_reason"]
     assert manifest["training"]["samples"] == 500
     assert manifest["training"]["grid"] == [128, 128]
 
@@ -31,8 +33,8 @@ def test_model_manifest_has_unique_valid_assets():
         assert Path(asset["filename"]).name == asset["filename"]
 
 
-def test_downloader_dry_run_selects_profiles(tmp_path):
-    command = [
+def _download_command(tmp_path):
+    return [
         sys.executable,
         str(ROOT / "scripts" / "download_models.py"),
         "--profile",
@@ -43,6 +45,18 @@ def test_downloader_dry_run_selects_profiles(tmp_path):
         str(tmp_path / "data"),
         "--dry-run",
     ]
+
+
+def test_downloader_refuses_quarantined_release_by_default(tmp_path):
+    result = subprocess.run(
+        _download_command(tmp_path), check=False, capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "quarantined" in result.stderr
+
+
+def test_downloader_audit_override_selects_profiles(tmp_path):
+    command = [*_download_command(tmp_path), "--allow-quarantined"]
     result = subprocess.run(command, check=True, capture_output=True, text=True)
     assert "fno_residential_ts.pt" in result.stdout
     assert "fno_residential_ts.json" in result.stdout

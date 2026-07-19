@@ -18,10 +18,11 @@ import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from scipy.ndimage import zoom  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from houdini_xlb.backend import simulate_heightmap_xlb  # noqa: E402
+from houdini_xlb import XlbConfig, analyze_heightmap  # noqa: E402
 
 from mokumitsu import Thresholds, generate_mokumitsu  # noqa: E402
 from mokumitsu.joint_renewal import (  # noqa: E402
@@ -36,15 +37,25 @@ from mokumitsu.wind import (  # noqa: E402
 )
 
 
-def _evaluation_frame(district, res: int, direction_deg: float, edge_distance_m: float):
+def _evaluation_frame(
+    district,
+    res: int,
+    direction_deg: float,
+    edge_distance_m: float,
+    domain_height_m: float,
+):
     turns = int(round(direction_deg / 90.0)) % 4
-    heightmap = np.rot90(district.heightmap(res), k=turns).copy()
+    heightmap = np.rot90(
+        district.heightmap(res, domain_height_m),
+        k=turns,
+    ).copy()
     masks = {
         name: np.rot90(mask, k=turns).copy()
         for name, mask in district_wind_masks(
             district,
             res,
             building_edge_distance_m=edge_distance_m,
+            domain_height_m=domain_height_m,
         ).items()
     }
     return _safe_heightmap(heightmap), masks
@@ -60,22 +71,33 @@ def _safe_heightmap(heightmap: np.ndarray) -> np.ndarray:
     return heightmap
 
 
-def _run_xlb(heightmap: np.ndarray, grid_xyz: tuple[int, int, int], steps: int):
-    speed = simulate_heightmap_xlb(
+def _xlb_heightmap(district, config: XlbConfig, direction_deg: float) -> np.ndarray:
+    if config.grid_x != config.grid_y:
+        raise ValueError("cardinal Mokumitsu verification requires a square XLB plan grid")
+    turns = int(round(direction_deg / 90.0)) % 4
+    heightmap = district.heightmap(config.grid_x, config.domain_height_m)
+    return _safe_heightmap(np.rot90(heightmap, k=turns).copy())
+
+
+def _display_speed(speed: np.ndarray, display_heightmap: np.ndarray) -> np.ndarray:
+    output = zoom(
+        speed,
+        (
+            display_heightmap.shape[0] / speed.shape[0],
+            display_heightmap.shape[1] / speed.shape[1],
+        ),
+        order=1,
+    ).astype(np.float32)
+    output[display_heightmap > 1e-7] = 0.0
+    return output
+
+
+def _run_xlb(heightmap: np.ndarray, config: XlbConfig, cache_dir: Path):
+    return analyze_heightmap(
         heightmap,
-        grid_xyz=grid_xyz,
-        wind=0.05,
-        reynolds=8000.0,
-        steps=steps,
-        reference_height=0.3,
-        pedestrian_z=4,
-        precision="FP32FP32",
-        average_window=min(800, steps),
-        average_every=100,
-    )
-    if not np.isfinite(speed).all():
-        raise RuntimeError("XLB produced non-finite velocity values")
-    return np.maximum(np.asarray(speed, dtype=np.float32), 0.0)
+        config,
+        cache_dir=cache_dir,
+    ).speed
 
 
 def _predict_fno(model, heightmap: np.ndarray) -> np.ndarray:
@@ -221,7 +243,17 @@ def main() -> None:
         default=0,
         help="XLB horizontal lattice; 0 uses twice the FNO resolution",
     )
-    parser.add_argument("--gridz", type=int, default=64)
+    parser.add_argument(
+        "--gridz",
+        type=int,
+        default=0,
+        help="vertical lattice; 0 derives near-cubic cells from the physical domain",
+    )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=Path("artifacts/houdini/cache/mokumitsu-joint-verify"),
+    )
     parser.add_argument("--out", default="outputs/joint_renewal_xlb.json")
     parser.add_argument("--fig", default="outputs/joint_renewal_xlb.png")
     args = parser.parse_args()
@@ -246,32 +278,69 @@ def main() -> None:
     if model.nx != res:
         raise ValueError("joint-renewal XLB verification requires a square surrogate grid")
     gridxy = args.gridxy or 2 * res
-    grid_xyz = (gridxy, gridxy, args.gridz)
+    dx = district.width_m / gridxy
+    grid_y = round(district.height_m / dx)
+    grid_z = args.gridz or round(scenario.domain_height_m / dx)
+    xlb_config = XlbConfig(
+        grid_x=gridxy,
+        grid_y=grid_y,
+        grid_z=grid_z,
+        steps=args.steps,
+        domain_length_x_m=district.width_m,
+        domain_length_y_m=district.height_m,
+        domain_height_m=scenario.domain_height_m,
+        reference_height_m=scenario.reference_height_m,
+        pedestrian_height_m=scenario.pedestrian_height_m,
+        average_window=min(800, args.steps),
+        average_every=100,
+    )
     hm0, masks0 = _evaluation_frame(
         district,
         res,
         args.wind_dir,
         scenario.building_edge_distance_m,
+        scenario.domain_height_m,
     )
     hm1, masks1 = _evaluation_frame(
         plan.district,
         res,
         args.wind_dir,
         scenario.building_edge_distance_m,
+        scenario.domain_height_m,
     )
 
     fno_u0 = float(model.reference_speed())
     fno_fields = (_predict_fno(model, hm0), _predict_fno(model, hm1))
     print(
         f"selected {len(plan.steps)} projects with {args.wind_model} FNO; "
-        f"running empty/before/after XLB on {grid_xyz} for {args.steps} steps",
+        f"running empty/before/after XLB on {xlb_config.grid_xyz} "
+        f"for {args.steps} steps at z={xlb_config.resolved_pedestrian_height_m:.2f} m",
         flush=True,
     )
-    empty_xlb = _run_xlb(np.zeros((res, res), np.float32), grid_xyz, args.steps)
-    xlb_u0 = float(empty_xlb.mean())
+    empty_xlb = _run_xlb(
+        np.zeros((xlb_config.grid_y, xlb_config.grid_x), np.float32),
+        xlb_config,
+        args.cache,
+    )
+    margin = max(1, round(5.0 / xlb_config.cell_sizes_m[0]))
+    xlb_u0 = float(empty_xlb[margin:-margin, margin:-margin].mean())
     xlb_fields = (
-        _run_xlb(hm0, grid_xyz, args.steps),
-        _run_xlb(hm1, grid_xyz, args.steps),
+        _display_speed(
+            _run_xlb(
+                _xlb_heightmap(district, xlb_config, args.wind_dir),
+                xlb_config,
+                args.cache,
+            ),
+            hm0,
+        ),
+        _display_speed(
+            _run_xlb(
+                _xlb_heightmap(plan.district, xlb_config, args.wind_dir),
+                xlb_config,
+                args.cache,
+            ),
+            hm1,
+        ),
     )
 
     thresholds = scenario.thresholds
@@ -304,7 +373,8 @@ def main() -> None:
         "wind_model": args.wind_model,
         "model": model.provenance(),
         "resolution": res,
-        "xlb_grid_xyz": grid_xyz,
+        "xlb_config": xlb_config.to_dict(),
+        "xlb_resolved_pedestrian_height_m": xlb_config.resolved_pedestrian_height_m,
         "xlb_steps": args.steps,
         "reference_speed": {"fno": fno_u0, "xlb": xlb_u0},
         "plan": plan.to_dict(include_district=False),

@@ -14,12 +14,12 @@ The repository has three layers:
         joint-project geometry, Pareto and feasibility logic
 
     optional adapters
-        TorchScript FNO checkpoint
-        NeuralOperator training checkpoint + persistent preview worker
+        portable and accelerated FNO runtimes (no supported v2 checkpoint yet)
+        persistent preview worker
         Houdini HIP builders, live editing and cached visualization
 
     verification
-        XLB forward checks through houdini-xlb
+        gated XLB forward checks through houdini-xlb
 
 ## Dependency direction
 
@@ -48,14 +48,15 @@ stable and the additional packaging complexity is justified.
     configuration + seed
         -> MokumitsuDistrict
         -> access and age priorities
-        -> fire and FNO screening
+        -> fire and optional validated-wind screening
         -> individual or joint-renewal candidates
         -> Pareto shortlist
         -> phased feasibility
         -> Houdini visualization
         -> selected candidates verified with XLB
 
-The live joint-design path uses the same core objects:
+When a checkpoint carrying the v2 physical contract is available, the live
+joint-design path uses the same core objects:
 
     Houdini parameters
         -> JSON-lines request to persistent project-Python worker
@@ -77,17 +78,23 @@ the adapter boundary; it is not the source of truth for the research model.
 
 ## Physics boundary
 
-The graph fire model and FNO are screening models. They rank and compare
-alternatives cheaply.
+The graph fire model is a screening model. The FNO adapter is also a screening
+path, but there is currently no supported residential checkpoint: the v1
+dataset and weights are quarantined after a finite catastrophic XLB sample, an
+incorrect vertical-scale contract and checkpoint selection on the test split
+were found.
 
-XLB is the higher-fidelity wind verification path. It is invoked only for
-shortlisted layouts because it is substantially more expensive. A candidate
-should not be described as validated merely because it improves the FNO
-objective.
+The corrected wind contract uses metres, an isotropic lattice, exact direct
+rasterization at the requested XLB grid and an interpolated 1.5 m pedestrian
+slice. XLB remains the intended higher-fidelity verification path, but the
+current KBC configuration fails the grid-independence gate. Consequently neither
+the v1 FNO result nor a corrected-grid XLB result may be described as validated.
+See [Wind validation status](WIND_VALIDATION_STATUS.md).
 
-The current FNO output is pedestrian-level scalar speed. It does not expose a
-full velocity vector or indoor ventilation rate. The Houdini heatmap therefore
-shows weighted U/U0, not streamlines and not room air changes.
+A future accepted FNO will output pedestrian-level scalar speed. It will not
+expose a full velocity vector or indoor ventilation rate. Houdini heatmaps show
+weighted U/U0, not streamlines and not room air changes. The bundled heatmaps
+are historical v1 values and are retained only to inspect the UI and cache flow.
 
 ## Reproducibility boundary
 
@@ -100,16 +107,19 @@ Source-controlled:
 
 External or generated:
 
-- release-hosted TorchScript/NeuralOperator checkpoints and training datasets;
-- XLB fields and large research outputs;
+- release-hosted TorchScript/NeuralOperator checkpoints and training datasets
+  (the current v1 release is quarantined and audit-only);
+- XLB fields, grid-gate reports and large research outputs;
 - regenerated JSON, figures and dynamic live-design bgeo.sc caches.
 
 Large model artifacts remain outside Git, while
 [`models/manifest.json`](../models/manifest.json) records the release tag,
 license, exact byte sizes, SHA-256 values, architecture and training provenance.
-The downloader verifies these values before installing an asset. Research output
-should still record the requested and resolved model names, grid size,
-checkpoint size and SHA-256 when results are intended for comparison.
+The downloader verifies these values before installing an asset and refuses a
+quarantined release unless an explicit audit-only override is supplied. Research
+output should still record the requested and resolved model names, physical
+domain, lattice shape, pedestrian height, backend signature, checkpoint size and
+SHA-256 when results are intended for comparison.
 
 ## Why Houdini remains in this repository
 

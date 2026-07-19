@@ -1,37 +1,50 @@
-# Residential FNO model assets v1
+# Residential FNO model assets v1 (quarantined)
 
-This release makes the Mokumitsu residential wind-screening model reproducible
-without storing large binaries in Git.
+> **Do not use these assets for design evaluation or train a replacement model
+> from this dataset.** The normal downloader intentionally refuses this release.
 
-## Assets
+## Audit status — 2026-07-19
 
-- `fno_residential_ts.pt` and `fno_residential_ts.json`: portable
-  TorchScript model used by the CLI, timeline builders and Houdini CPU fallback.
-- `fno_residential_xlb.pt`: NeuralOperator training checkpoint used by the
-  persistent CUDA/CPU live-design worker.
-- `residential_xlb.npz`: 500 synthetic 128 × 128 input/speed pairs generated
-  with XLB on the NVIDIA Warp backend.
+The v1 release is retained only so the failure can be reproduced. It is not a
+supported model release.
 
-Download and verify the checkpoint files from a repository clone:
+The audit found three invalidating defects:
 
-    .venv\Scripts\python.exe scripts\download_models.py --profile all
+- finite but catastrophic XLB sample 374 (`max(U/U0) ≈ 6719`), which inflated
+  the target standard deviation by about 9.1×;
+- building heights normalized by the 100 m horizontal domain while the old
+  lattice used a different vertical spacing, so the nominal pedestrian slice
+  and geometry did not have a consistent metric meaning;
+- normalization and checkpoint selection used information outside the training
+  split, including selecting the checkpoint on the test split.
 
-Add `--include-dataset` to obtain the training dataset. Every download is
-checked against its exact byte size and SHA-256 in
-`models/manifest.json`. Existing mismatched files are never overwritten unless
-`--force` is supplied.
+The corrected direct-raster, isotropic-grid protocol has also not yet passed its
+grid-independence gate. Therefore filtering sample 374 is not sufficient and the
+v1 dataset must not be retrained.
 
-The released dataset can recreate both runtime formats:
+Full measurements and acceptance criteria are in
+[`docs/WIND_VALIDATION_STATUS.md`](../docs/WIND_VALIDATION_STATUS.md).
 
-    .venv\Scripts\python.exe scripts\train_residential_fno.py --best
-    .venv\Scripts\python.exe scripts\export_residential_torchscript.py
+## Audit-only retrieval
 
-## Scope and license
+The manifest marks this release as `quarantined`. Historical reproduction
+requires an explicit acknowledgement:
 
-The weights and dataset are released under the repository's MIT license. XLB,
-the forward simulation engine used to generate the dataset, is Apache-2.0.
+    .venv\Scripts\python.exe scripts\download_models.py --allow-quarantined --profile all --include-dataset
 
-The model is a screening surrogate for comparing synthetic dense-residential
-layouts. It is not a calibrated regulatory wind assessment, does not predict
-indoor ventilation, and does not replace XLB or other validated CFD verification
-of shortlisted designs.
+Every file is still checked against the exact byte size and SHA-256 recorded in
+`models/manifest.json`. The override changes only access to the historical
+artifact; it does not make the model valid.
+
+## Requirements for a future v2 release
+
+A replacement release must be generated only after the forward solver passes the
+documented grid, boundary-condition and averaging gates. Its dataset and model
+metadata must record the physical domain, isotropic lattice, exact raster shape,
+resolved pedestrian height, backend signature, split provenance and quality
+statistics. Training statistics must come from the training split, model
+selection from validation, and the test split must remain untouched until final
+reporting.
+
+The asset files remain MIT-licensed; XLB is Apache-2.0. Quarantine is a
+scientific-validity status, not a malware or licensing warning.
