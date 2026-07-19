@@ -11,7 +11,6 @@ from pathlib import Path
 
 import numpy as np
 from houdini_xlb import BACKEND_SIGNATURE, XlbConfig, analyze_heightmap
-from scipy.ndimage import zoom
 
 from mokumitsu import MokumitsuConfig, generate_mokumitsu
 from mokumitsu.joint_renewal import (
@@ -273,6 +272,8 @@ def _resume(path: Path, physics: dict[str, object], res: int):
 
 
 def main() -> None:
+    from scipy.ndimage import zoom
+
     args = build_parser().parse_args()
     if (
         args.n <= 0

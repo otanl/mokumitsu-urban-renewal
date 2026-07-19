@@ -35,7 +35,11 @@ verify = [
     "houdini-xlb[xlb] @ git+https://github.com/otanl/houdini-xlb.git@0d49c20748c91bc6ab5983ecdf79f8a062d92eeb",
     "matplotlib>=3.8,<4",
 ]
-dev = ["pytest", "ruff"]
+dev = [
+    "pytest",
+    "ruff",
+    "houdini-xlb @ git+https://github.com/otanl/houdini-xlb.git@0d49c20748c91bc6ab5983ecdf79f8a062d92eeb",
+]
 
 [project.urls]
 Homepage = "https://github.com/otanl/mokumitsu-urban-renewal"
